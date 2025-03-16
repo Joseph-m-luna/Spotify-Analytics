@@ -24,7 +24,7 @@ class Genius:
         self.headers_alt_index = 1
         self.headers = self.headers_alts[1]
     
-    def get_first_hit(self, song, artist):
+    def get_search(self, song, artist, raw=False):
         data = {'q': song + " " + artist}
         response = requests.get(self.base_url + "/search", data=data, headers=self.headers)
         
@@ -32,9 +32,21 @@ class Genius:
 
         if len(response_data["response"]["hits"]) == 0:
             return None
+        elif raw:
+            return response
         else: 
-            first_hit = response_data["response"]["hits"][0]
-            return first_hit
+            # Find most popular response
+            max_popularity = 0
+            max_index = -1
+            for i, hit in enumerate(response_data["response"]["hits"]):
+                if "pageviews" in hit["result"]["stats"].keys():
+                    if hit["result"]["stats"]["pageviews"] > max_popularity:
+                        max_popularity = int(hit["result"]["stats"]["pageviews"])
+                        max_index = i
+            if max_index == -1:
+                return None
+            else:
+                return response_data["response"]["hits"][max_index]
 
     def get_lyrics(song, url="https://genius.com/Frank-sinatra-the-way-you-look-tonight-lyrics"):
         response = requests.get(url)
@@ -81,14 +93,20 @@ def weighted_random(low, high):
     weights = [high - i for i in range(low, high + 1)]
     return random.choices(range(low, high + 1), weights=weights, k=1)[0]
 
-if __name__ == "__main__":
+def get_single_search_results(song, artist):
+    genius = Genius()
+
+    song_data = genius.get_search(song, artist, raw=False)
+    
+    pprint(song_data)
+
+def scrape_year(year=2024):
     genius = Genius()
     
     df_1959 = pd.read_csv("../Spotify_API_scrape/by_year_data/2024_music_data.csv")
     lyrics_df = pd.DataFrame(columns=["Artist", "Song", "Lyrics"])
 
     for i, row in df_1959.iterrows():
-
         done = False
         attempts = 0
 
@@ -97,7 +115,7 @@ if __name__ == "__main__":
             song = row["Track Name"]
             print(f"searching for {artist} - {song}")
 
-            song_data = genius.get_first_hit(song, artist)
+            song_data = genius.get_search(song, artist)
 
             list_manual = []
             
@@ -142,3 +160,7 @@ if __name__ == "__main__":
 
     lyrics_df.to_csv("1959_lyrics.csv", index=False)
     print("Done!")
+
+if __name__ == "__main__":
+    scrape_year(2024)
+    # get_single_search_results("IDGAF (feat. Yeat)", "Drake, Yeat")
