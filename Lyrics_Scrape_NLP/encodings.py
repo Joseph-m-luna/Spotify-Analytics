@@ -12,5 +12,8 @@ class TextEncoder:
 
         return cos(torch.from_numpy(embeddings[0]).unsqueeze(0), torch.from_numpy(embeddings[1]).unsqueeze(0)).item()
     
+    def encode(self, sentence):
+        return self.model.encode(sentence)
+    
 if __name__ == "__main__":
     pass

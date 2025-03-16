@@ -50,6 +50,9 @@ class AZLyrics:
         soup = BeautifulSoup(response.text, "html.parser")
         lyrics_section = soup.find_all("div", class_="panel-heading")
 
+        if not lyrics_section:
+            return []
+        
         pages_section = lyrics_section[0].find("small").text.strip("[]").split(" ")
         page_size = int(pages_section[0].split("-")[1])
         total_pages = int(pages_section[2])
@@ -63,7 +66,7 @@ class AZLyrics:
 
         return all_results
     
-    def fetch_lyrics_page(self, query, page, xparam="3ef797227307e0c1e25d9ff9afb5f4f9248014a66c6170388d4c3e4213c5fcfe"):
+    def fetch_lyrics_page(self, query, page, xparam):
         wparam = "lyrics"
         url = f"https://search.azlyrics.com/search.php?q={query}&w={wparam}&p={page}&x={xparam}"
 
@@ -73,7 +76,12 @@ class AZLyrics:
         soup = BeautifulSoup(response.text, "html.parser")
 
         # lyric results
-        lyrics_section = soup.find_all("div", class_="panel-heading")[0].find_parent().find_all("td", class_="text-left visitedlyr")
+        lyrics_section = soup.find_all("div", class_="panel-heading")
+        
+        if len(lyrics_section) > 0:
+            lyrics_section = lyrics_section[0].find_parent().find_all("td", class_="text-left visitedlyr")
+        else:
+            return []
 
         all_results = []
         
@@ -93,7 +101,6 @@ class AZLyrics:
         return all_results
     
     def fetch_lyrics(self, url):
-        print(url)
         response = requests.get(url)
         response.raise_for_status()
 
@@ -101,8 +108,7 @@ class AZLyrics:
 
         descriptor = soup.find("h1").text
         lyrics = soup.find(string=lambda text: isinstance(text, Comment) and "Usage of azlyrics.com content by any third-party lyrics provider is prohibited by our licensing agreement" in text).find_parent("div")
-        print(f"Descriptor: {descriptor}")
-        print(f"Lyrics: {lyrics.text}")
+
         with open("test.html", "w") as file:
             file.write(soup.prettify())
         if lyrics is None:
