@@ -1,10 +1,20 @@
 import requests
 from pprint import pprint
-import json
 from bs4 import BeautifulSoup
 import pandas as pd
 from time import sleep
 import random
+from text_encoder import TextEncoder
+import numpy as np
+import os
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+import undetected_chromedriver as uc
+import matplotlib.pyplot as plt
+from plyer import notification
 
 class Genius:
     def __init__(self):
@@ -23,10 +33,50 @@ class Genius:
         }]
         self.headers_alt_index = 1
         self.headers = self.headers_alts[1]
-    
+        self.options = uc.ChromeOptions()
+        self.options.headless = False
+
+        self.driver = uc.Chrome(options=self.options)
+
+
+    def get_search_engine(self, song, artist):
+        # options = webdriver.ChromeOptions()
+        # options.add_argument("--headless")  # Run without opening a browser
+        # options.add_argument("--no-sandbox")
+        # options.add_argument("--disable-dev-shm-usage")
+
+        # driver = webdriver.Chrome(options=options)
+        self.driver.get("https://www.google.com")
+
+        sleep(0.5)
+        google = WebDriverWait(self.driver, 30).until(EC.visibility_of_element_located((By.XPATH, '//*[@id="APjFqb"]')))
+        # //*[@id="APjFqb"]
+        # //*[@id="APjFqb"]
+
+        cleaned_song = song.replace('"', "")
+        cleaned_artist = artist.replace('"', "")
+        cleaned_song = cleaned_song.replace("-", "")
+        cleaned_artist = cleaned_artist.replace("-", "")
+        cleaned_song = cleaned_song.replace(",", "")
+        cleaned_artist = cleaned_artist.replace(",", "")
+        google.send_keys(f"{cleaned_song} {cleaned_artist} genius lyrics")
+
+        sleep(0.5)
+        google.send_keys(Keys.RETURN)
+        sleep(1)
+
+        results = self.driver.find_element(By.CSS_SELECTOR, "h3")
+        result_link = results.find_element(By.XPATH, "./ancestor::a").get_attribute("href")
+        return result_link
+
     def get_search(self, song, artist, raw=False):
         data = {'q': song + " " + artist}
-        response = requests.get(self.base_url + "/search", data=data, headers=self.headers)
+        try:
+            response = requests.get(self.base_url + "/search", data=data, headers=self.headers)
+        except Exception as e:
+            print(f"Exception occurred while getting search results for {song} - {artist}: {e}")
+            sleep(60)
+            return None
         
         response_data = response.json()
 
@@ -49,8 +99,22 @@ class Genius:
                 return response_data["response"]["hits"][max_index]
 
     def get_lyrics(song, url="https://genius.com/Frank-sinatra-the-way-you-look-tonight-lyrics"):
+        url_overrides = {
+            "https://www.musixmatch.com/lyrics/Far-East-Movement-feat-Ryan-Tedder/Rocketeer" : "https://genius.com/Far-east-movement-rocketeer-lyrics",
+            "https://www.musixmatch.com/lyrics/45447790/10617727" : "https://genius.com/Keri-hilson-turnin-me-on-lyrics",
+        }
+
+        if url in url_overrides.keys():
+            url = url_overrides[url]
+
         response = requests.get(url)
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except Exception as e:
+            print(f"Exception occurred while getting lyrics for {song}: {e}")
+            notification.notify(title="url error", message=f"address error", timeout=999999)
+            return None
+            
 
         soup = BeautifulSoup(response.text, "html.parser")
         lyrics_divs = soup.find_all("div", class_="Lyrics__Container-sc-926d9e10-1 fEHzCI", attrs={"data-lyrics-container" : "true"})
@@ -69,6 +133,8 @@ class Genius:
                             for s_element in span:
                                 if s_element.name == "br":
                                     raw_lyrics += "\n"
+                                elif s_element.name == "i":
+                                    raw_lyrics += s_element.text
                                 elif isinstance(s_element, str):
                                     raw_lyrics += s_element
 
@@ -96,15 +162,18 @@ def weighted_random(low, high):
 def get_single_search_results(song, artist):
     genius = Genius()
 
-    song_data = genius.get_search(song, artist, raw=False)
-    
-    pprint(song_data)
+    song_data = genius.get_search_engine(song, artist)
+
+    print(song_data)
 
 def scrape_year(year=2024):
     genius = Genius()
+    encoder = TextEncoder()
     
-    df_1959 = pd.read_csv("../Spotify_API_scrape/by_year_data/2024_music_data.csv")
-    lyrics_df = pd.DataFrame(columns=["Artist", "Song", "Lyrics"])
+    df_1959 = pd.read_csv(f"../Spotify_API_scrape/by_year_data/{year}_music_data.csv")
+    lyrics_df = pd.DataFrame(columns=["Artist", "Song", "Lyrics", "Encoding"])
+
+    list_manual = []
 
     for i, row in df_1959.iterrows():
         done = False
@@ -115,25 +184,42 @@ def scrape_year(year=2024):
             song = row["Track Name"]
             print(f"searching for {artist} - {song}")
 
-            song_data = genius.get_search(song, artist)
-
-            list_manual = []
+            if type(song) != str or type(artist) != str:
+                print(f"error in row: {i}, {artist} - {song}, type is not string")
+                done = True
+                continue
+            song_data = genius.get_search_engine(song, artist)
             
             if song_data is not None:
-                url = song_data["result"]["url"]
+                url = song_data
                 lyrics = genius.get_lyrics(url)
-                print(f"lyrics found for {artist} - {song}")
+                if lyrics is None:
+                    print(f"No lyrics found for {artist} - {song}")
+                    list_manual.append((artist, song))
+                    done = True
+                else:
+                    print(f"lyrics found for {artist} - {song}")
 
-                with open(f"./Lyrics_2024/{song.replace(' ', '_')}|||{artist.replace(' ', '_')}.txt", "w") as file:
-                    file.write(lyrics)
+                    os.makedirs(f"./Lyrics_{year}", exist_ok=True)
 
-                sleeptime = weighted_random(1, 15)
-                print(f"Sleeping for {sleeptime} seconds")
-                sleep(sleeptime)
+                    safe_song_name = song.replace(' ', '_').replace("/", "_")
+                    safe_artist_name = artist.replace(' ', '_').replace("/", "_")
 
-                new_row = pd.DataFrame({"Artist": [artist], "Song": [song], "Lyrics": [lyrics]})
-                lyrics_df = pd.concat([lyrics_df, new_row], ignore_index=True)
-                done = True
+                    with open(f"./Lyrics_{year}/{safe_song_name}|||{safe_artist_name}.txt", "w") as file:
+                        file.write(lyrics)
+
+                    # sleeptime = weighted_random(1, 3)
+                    sleeptime = 0.5
+                    print(f"Sleeping for {sleeptime} seconds")
+                    sleep(sleeptime)
+
+                    encoding = encoder.encode(lyrics)
+                    encoding_list = encoding.tolist()
+                    series = pd.Series([encoding_list])
+
+                    new_row = pd.DataFrame({"Artist": [artist], "Song": [song], "Lyrics": [lyrics], "Encoding": series})
+                    lyrics_df = pd.concat([lyrics_df, new_row], ignore_index=True)
+                    done = True
             else:
                 if attempts == 0:
                     print(f"No lyrics found for {artist} - {song}, attempting to swap headers")
@@ -151,16 +237,27 @@ def scrape_year(year=2024):
                 attempts += 1
     
     print("Manual search required for:")
-    for artist, song in list_manual:
-        print(f"{artist} - {song}")
+    print(list_manual)
     
-    with open("manual_search.txt", "w") as file:
+    with open(f"manual_search_{year}.txt", "w") as file:
         for artist, song in list_manual:
             file.write(f"{artist} - {song}\n{song} {artist}\n\n")
 
-    lyrics_df.to_csv("1959_lyrics.csv", index=False)
+    lyrics_df.to_csv(f"{year}_lyrics.csv", index=False)
     print("Done!")
 
+def read_test_csv():
+    df = pd.read_csv("2024_test_encoding.csv")
+    array_values = df["Encoding"]
+    ndarraystuff = np.array(array_values[0])
+    print(ndarraystuff)
+    print(type(ndarraystuff))
+
 if __name__ == "__main__":
-    scrape_year(2024)
-    # get_single_search_results("IDGAF (feat. Yeat)", "Drake, Yeat")
+    # for i in range(1961, 1958, -1):
+    #     scrape_year(i)
+    for i in [1999, 1968]:
+        scrape_year(i)
+    # get_single_search_results("Bulletproof", "Nate Smith")
+
+# NOTE: 2019, thank u next, Ariana Grande
